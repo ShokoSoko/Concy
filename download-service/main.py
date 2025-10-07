@@ -65,15 +65,8 @@ async def download_video(request: DownloadRequest):
         
         cookies_file = setup_cookies()
         
-        visitor_data, po_token = generate_po_token()
-        
-        extractor_args = "youtube:player_client=android,web"
-        if visitor_data and po_token:
-            extractor_args = f"youtube:player_client=android,web;po_token={po_token};visitor_data={visitor_data}"
-        
         base_cmd = [
             "yt-dlp",
-            "--extractor-args", extractor_args,
             "--no-check-certificate",
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         ]
