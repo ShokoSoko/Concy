@@ -33,10 +33,12 @@ async def download_video(request: DownloadRequest):
         # Download video using yt-dlp
         output_template = str(temp_dir / "%(id)s.%(ext)s")
         
-        # Run yt-dlp command
+        # Run yt-dlp command with better format selection
         result = subprocess.run([
             "yt-dlp",
-            "-f", "best[ext=mp4]/best",  # Get best MP4 or best available
+            "--update",  # Update yt-dlp to latest version
+            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",  # More flexible format selection
+            "--merge-output-format", "mp4",  # Ensure output is MP4
             "-o", output_template,
             "--print", "after_move:filepath",
             "--print", "title",
