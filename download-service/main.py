@@ -22,22 +22,18 @@ class DownloadRequest(BaseModel):
 
 def setup_cookies():
     """Setup cookies file from environment variable if provided"""
-    cookies_json = os.getenv("YOUTUBE_COOKIES")
-    if cookies_json:
+    cookies_data = os.getenv("YOUTUBE_COOKIES")
+    if cookies_data:
         try:
             cookies_file = Path("cookies.txt")
-            cookies_data = json.loads(cookies_json)
             with open(cookies_file, 'w') as f:
-                f.write("# Netscape HTTP Cookie File\n")
-                for cookie in cookies_data:
-                    domain = cookie.get('domain', '.youtube.com')
-                    flag = 'TRUE' if domain.startswith('.') else 'FALSE'
-                    path = cookie.get('path', '/')
-                    secure = 'TRUE' if cookie.get('secure', False) else 'FALSE'
-                    expiration = str(cookie.get('expirationDate', 0))
-                    name = cookie.get('name', '')
-                    value = cookie.get('value', '')
-                    f.write(f"{domain}\t{flag}\t{path}\t{secure}\t{expiration}\t{name}\t{value}\n")
+                # If it already starts with the Netscape header, write as-is
+                if cookies_data.strip().startswith("# Netscape HTTP Cookie File"):
+                    f.write(cookies_data)
+                else:
+                    # Otherwise, add the header
+                    f.write("# Netscape HTTP Cookie File\n")
+                    f.write(cookies_data)
             return str(cookies_file)
         except Exception as e:
             print(f"Warning: Failed to setup cookies: {e}")
