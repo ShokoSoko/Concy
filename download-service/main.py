@@ -30,36 +30,40 @@ async def download_video(request: DownloadRequest):
         temp_dir = Path("temp_downloads")
         temp_dir.mkdir(exist_ok=True)
         
+        metadata_result = subprocess.run([
+            "yt-dlp",
+            "--dump-json",
+            "--no-download",
+            "--extractor-args", "youtube:player_client=android,web",
+            "--no-check-certificate",
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            request.url
+        ], capture_output=True, text=True, check=True)
+        
+        # Parse metadata JSON
+        metadata = json.loads(metadata_result.stdout)
+        title = metadata.get("title", "video")
+        duration = metadata.get("duration", 0)
+        thumbnail = metadata.get("thumbnail", "")
+        
         # Download video using yt-dlp
         output_template = str(temp_dir / "%(id)s.%(ext)s")
         
         # Run yt-dlp command with bot bypass options
-        result = subprocess.run([
+        download_result = subprocess.run([
             "yt-dlp",
-            "--update",  # Update yt-dlp to latest version
             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
             "--merge-output-format", "mp4",
-            # Bot bypass flags
             "--extractor-args", "youtube:player_client=android,web",
             "--no-check-certificate",
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "-o", output_template,
             "--print", "after_move:filepath",
-            "--print", "title",
-            "--print", "duration",
-            "--print", "thumbnail",
             request.url
         ], capture_output=True, text=True, check=True)
         
-        # Parse yt-dlp output
-        lines = result.stdout.strip().split('\n')
-        if len(lines) < 4:
-            raise HTTPException(status_code=500, detail="Failed to parse yt-dlp output")
-        
-        filepath = lines[0]
-        title = lines[1]
-        duration = float(lines[2]) if lines[2] else 0
-        thumbnail = lines[3] if len(lines) > 3 else ""
+        # Get filepath from output
+        filepath = download_result.stdout.strip().split('\n')[-1]
         
         # Upload to Vercel Blob
         blob_token = os.getenv("BLOB_READ_WRITE_TOKEN")
