@@ -20,6 +20,29 @@ app.add_middleware(
 class DownloadRequest(BaseModel):
     url: str
 
+def setup_cookies():
+    """Setup cookies file from environment variable if provided"""
+    cookies_json = os.getenv("YOUTUBE_COOKIES")
+    if cookies_json:
+        try:
+            cookies_file = Path("cookies.txt")
+            cookies_data = json.loads(cookies_json)
+            with open(cookies_file, 'w') as f:
+                f.write("# Netscape HTTP Cookie File\n")
+                for cookie in cookies_data:
+                    domain = cookie.get('domain', '.youtube.com')
+                    flag = 'TRUE' if domain.startswith('.') else 'FALSE'
+                    path = cookie.get('path', '/')
+                    secure = 'TRUE' if cookie.get('secure', False) else 'FALSE'
+                    expiration = str(cookie.get('expirationDate', 0))
+                    name = cookie.get('name', '')
+                    value = cookie.get('value', '')
+                    f.write(f"{domain}\t{flag}\t{path}\t{secure}\t{expiration}\t{name}\t{value}\n")
+            return str(cookies_file)
+        except Exception as e:
+            print(f"Warning: Failed to setup cookies: {e}")
+    return None
+
 def generate_po_token():
     """Generate YouTube PoToken using youtube-po-token-generator"""
     try:
@@ -44,21 +67,34 @@ async def download_video(request: DownloadRequest):
         temp_dir = Path("temp_downloads")
         temp_dir.mkdir(exist_ok=True)
         
+        cookies_file = setup_cookies()
+        
         visitor_data, po_token = generate_po_token()
         
         extractor_args = "youtube:player_client=android,web"
         if visitor_data and po_token:
             extractor_args = f"youtube:player_client=android,web;po_token={po_token};visitor_data={visitor_data}"
         
-        metadata_result = subprocess.run([
+        base_cmd = [
             "yt-dlp",
-            "--dump-json",
-            "--no-download",
             "--extractor-args", extractor_args,
             "--no-check-certificate",
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            request.url
-        ], capture_output=True, text=True, check=True)
+        ]
+        
+        if cookies_file:
+            base_cmd.extend(["--cookies", cookies_file])
+        
+        metadata_result = subprocess.run(
+            base_cmd + [
+                "--dump-json",
+                "--no-download",
+                request.url
+            ],
+            capture_output=True,
+            text=True,
+            check=True
+        )
         
         metadata = json.loads(metadata_result.stdout)
         title = metadata.get("title", "video")
@@ -68,16 +104,17 @@ async def download_video(request: DownloadRequest):
         
         output_template = str(temp_dir / f"{video_id}.mp4")
         
-        subprocess.run([
-            "yt-dlp",
-            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-            "--merge-output-format", "mp4",
-            "--extractor-args", extractor_args,
-            "--no-check-certificate",
-            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "-o", output_template,
-            request.url
-        ], capture_output=True, text=True, check=True)
+        subprocess.run(
+            base_cmd + [
+                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                "--merge-output-format", "mp4",
+                "-o", output_template,
+                request.url
+            ],
+            capture_output=True,
+            text=True,
+            check=True
+        )
         
         vercel_upload_url = os.getenv("VERCEL_UPLOAD_URL", "https://your-app.vercel.app/api/upload-blob")
         
