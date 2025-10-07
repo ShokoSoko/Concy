@@ -38,7 +38,7 @@ def generate_po_token():
 
 @app.post("/download")
 async def download_video(request: DownloadRequest):
-    """Download YouTube video using yt-dlp and upload to Vercel Blob"""
+    """Download YouTube video using yt-dlp and send to Vercel for Blob upload"""
     
     try:
         temp_dir = Path("temp_downloads")
@@ -79,63 +79,40 @@ async def download_video(request: DownloadRequest):
             request.url
         ], capture_output=True, text=True, check=True)
         
-        blob_token = os.getenv("BLOB_READ_WRITE_TOKEN")
-        if not blob_token:
-            raise HTTPException(status_code=500, detail="BLOB_READ_WRITE_TOKEN not configured")
+        vercel_upload_url = os.getenv("VERCEL_UPLOAD_URL", "https://your-app.vercel.app/api/upload-blob")
         
         filename = f"youtube-{video_id}-{int(os.path.getmtime(output_template) * 1000)}.mp4"
         
-        upload_request = requests.post(
-            "https://blob.vercel-storage.com",
-            headers={
-                "Authorization": f"Bearer {blob_token}",
-            },
-            json={
-                "pathname": filename,
-                "type": "video/mp4",
-            }
-        )
-        
-        if upload_request.status_code != 200:
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Blob upload request failed: {upload_request.text}"
-            )
-        
-        upload_data = upload_request.json()
-        upload_url = upload_data.get("url")
-        
-        if not upload_url:
-            raise HTTPException(status_code=500, detail="No upload URL received from Blob")
-        
         with open(output_template, 'rb') as f:
-            upload_response = requests.put(
-                upload_url,
-                data=f,
-                headers={"Content-Type": "video/mp4"}
+            files = {'file': (filename, f, 'video/mp4')}
+            data = {
+                'filename': filename,
+                'title': title,
+                'duration': str(duration),
+                'thumbnail': thumbnail,
+                'videoId': video_id
+            }
+            
+            upload_response = requests.post(
+                vercel_upload_url,
+                files=files,
+                data=data,
+                timeout=300
             )
         
-        if upload_response.status_code not in [200, 201]:
+        if upload_response.status_code != 200:
             raise HTTPException(
                 status_code=500,
-                detail=f"Blob upload failed: {upload_response.text}"
+                detail=f"Vercel upload failed: {upload_response.text}"
             )
         
         os.remove(output_template)
         
-        minutes = int(duration // 60)
-        seconds = int(duration % 60)
+        result = upload_response.json()
         
         return {
             "success": True,
-            "video": {
-                "url": upload_data.get("downloadUrl", upload_url),
-                "title": title,
-                "duration": duration,
-                "durationFormatted": f"{minutes}m {seconds}s",
-                "thumbnail": thumbnail,
-                "videoId": video_id
-            }
+            "video": result["video"]
         }
         
     except subprocess.CalledProcessError as e:
