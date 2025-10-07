@@ -33,12 +33,16 @@ async def download_video(request: DownloadRequest):
         # Download video using yt-dlp
         output_template = str(temp_dir / "%(id)s.%(ext)s")
         
-        # Run yt-dlp command with better format selection
+        # Run yt-dlp command with bot bypass options
         result = subprocess.run([
             "yt-dlp",
             "--update",  # Update yt-dlp to latest version
-            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",  # More flexible format selection
-            "--merge-output-format", "mp4",  # Ensure output is MP4
+            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "--merge-output-format", "mp4",
+            # Bot bypass flags
+            "--extractor-args", "youtube:player_client=android,web",
+            "--no-check-certificate",
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "-o", output_template,
             "--print", "after_move:filepath",
             "--print", "title",
