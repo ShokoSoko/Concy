@@ -1,10 +1,10 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import subprocess
 import os
 import json
+import requests
 from pathlib import Path
 
 app = FastAPI()
@@ -22,7 +22,7 @@ class DownloadRequest(BaseModel):
 
 @app.post("/download")
 async def download_video(request: DownloadRequest):
-    """Download YouTube video using yt-dlp and return metadata + video file"""
+    """Download YouTube video using yt-dlp and upload to Vercel Blob"""
     
     try:
         temp_dir = Path("temp_downloads")
@@ -57,26 +57,67 @@ async def download_video(request: DownloadRequest):
             request.url
         ], capture_output=True, text=True, check=True)
         
-        def iterfile():
-            with open(output_template, 'rb') as f:
-                yield from f
-            os.remove(output_template)
+        blob_token = os.getenv("BLOB_READ_WRITE_TOKEN")
+        if not blob_token:
+            raise HTTPException(status_code=500, detail="BLOB_READ_WRITE_TOKEN not configured")
+        
+        filename = f"youtube-{video_id}-{int(os.path.getmtime(output_template) * 1000)}.mp4"
+        
+        # Step 1: Request upload URL from Vercel Blob
+        upload_request = requests.post(
+            "https://blob.vercel-storage.com",
+            headers={
+                "Authorization": f"Bearer {blob_token}",
+            },
+            json={
+                "pathname": filename,
+                "type": "video/mp4",
+            }
+        )
+        
+        if upload_request.status_code != 200:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Blob upload request failed: {upload_request.text}"
+            )
+        
+        upload_data = upload_request.json()
+        upload_url = upload_data.get("url")
+        
+        if not upload_url:
+            raise HTTPException(status_code=500, detail="No upload URL received from Blob")
+        
+        # Step 2: Upload file to the provided URL
+        with open(output_template, 'rb') as f:
+            upload_response = requests.put(
+                upload_url,
+                data=f,
+                headers={"Content-Type": "video/mp4"}
+            )
+        
+        if upload_response.status_code not in [200, 201]:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Blob upload failed: {upload_response.text}"
+            )
+        
+        # Clean up local file
+        os.remove(output_template)
         
         minutes = int(duration // 60)
         seconds = int(duration % 60)
         
-        return StreamingResponse(
-            iterfile(),
-            media_type="video/mp4",
-            headers={
-                "X-Video-Title": title,
-                "X-Video-Duration": str(duration),
-                "X-Video-Duration-Formatted": f"{minutes}m {seconds}s",
-                "X-Video-Thumbnail": thumbnail,
-                "X-Video-ID": video_id,
-                "Content-Disposition": f'attachment; filename="{video_id}.mp4"'
+        return {
+            "success": True,
+            "video": {
+                "url": upload_data.get("downloadUrl", upload_url),
+                "title": title,
+                "duration": duration,
+                "durationFormatted": f"{minutes}m {seconds}s",
+                "thumbnail": thumbnail,
+                "videoId": video_id
             }
-        )
+        }
         
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"yt-dlp error: {e.stderr}")
