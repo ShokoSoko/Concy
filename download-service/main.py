@@ -20,6 +20,22 @@ app.add_middleware(
 class DownloadRequest(BaseModel):
     url: str
 
+def generate_po_token():
+    """Generate YouTube PoToken using youtube-po-token-generator"""
+    try:
+        result = subprocess.run(
+            ["youtube-po-token-generator"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30
+        )
+        token_data = json.loads(result.stdout)
+        return token_data.get("visitorData"), token_data.get("poToken")
+    except Exception as e:
+        print(f"Warning: Failed to generate PoToken: {e}")
+        return None, None
+
 @app.post("/download")
 async def download_video(request: DownloadRequest):
     """Download YouTube video using yt-dlp and upload to Vercel Blob"""
@@ -28,11 +44,17 @@ async def download_video(request: DownloadRequest):
         temp_dir = Path("temp_downloads")
         temp_dir.mkdir(exist_ok=True)
         
+        visitor_data, po_token = generate_po_token()
+        
+        extractor_args = "youtube:player_client=android,web"
+        if visitor_data and po_token:
+            extractor_args = f"youtube:player_client=android,web;po_token={po_token};visitor_data={visitor_data}"
+        
         metadata_result = subprocess.run([
             "yt-dlp",
             "--dump-json",
             "--no-download",
-            "--extractor-args", "youtube:player_client=android,web",
+            "--extractor-args", extractor_args,
             "--no-check-certificate",
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             request.url
@@ -50,7 +72,7 @@ async def download_video(request: DownloadRequest):
             "yt-dlp",
             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
             "--merge-output-format", "mp4",
-            "--extractor-args", "youtube:player_client=android,web",
+            "--extractor-args", extractor_args,
             "--no-check-certificate",
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "-o", output_template,
@@ -63,7 +85,6 @@ async def download_video(request: DownloadRequest):
         
         filename = f"youtube-{video_id}-{int(os.path.getmtime(output_template) * 1000)}.mp4"
         
-        # Step 1: Request upload URL from Vercel Blob
         upload_request = requests.post(
             "https://blob.vercel-storage.com",
             headers={
@@ -87,7 +108,6 @@ async def download_video(request: DownloadRequest):
         if not upload_url:
             raise HTTPException(status_code=500, detail="No upload URL received from Blob")
         
-        # Step 2: Upload file to the provided URL
         with open(output_template, 'rb') as f:
             upload_response = requests.put(
                 upload_url,
@@ -101,7 +121,6 @@ async def download_video(request: DownloadRequest):
                 detail=f"Blob upload failed: {upload_response.text}"
             )
         
-        # Clean up local file
         os.remove(output_template)
         
         minutes = int(duration // 60)
